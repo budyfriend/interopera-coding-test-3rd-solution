@@ -1,273 +1,168 @@
 """
 Vector store service using pgvector (PostgreSQL extension)
 
-TODO: Implement vector storage using pgvector
-- Create embeddings table in PostgreSQL
-- Store document chunks with vector embeddings
-- Implement similarity search using pgvector operators
-- Handle metadata filtering
+Provides:
+- add_document(content, metadata)
+- similarity_search(query, k, filter_metadata)
+- clear(fund_id)
 """
 from typing import List, Dict, Any, Optional
+import json
 import numpy as np
-from sqlalchemy.orm import Session
+import asyncio
 from sqlalchemy import text
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from app.core.config import settings
 from app.db.session import SessionLocal
-import json
 
+# Choose embedding backend wrappers as available in your environment.
+# We attempt to use OpenAIEmbeddings or HuggingFaceEmbeddings if present; fallback to dummy.
+try:
+    from langchain_openai import OpenAIEmbeddings
+except Exception:
+    OpenAIEmbeddings = None
+try:
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+except Exception:
+    HuggingFaceEmbeddings = None
 
 class VectorStore:
-    """pgvector-based vector store for document embeddings"""
-    
-    def __init__(self, db: Session = None):
+    def __init__(self, db=None):
         self.db = db or SessionLocal()
-        self.embeddings = self._initialize_embeddings()
-        self._ensure_extension()
-    
-    def _initialize_embeddings(self):
-        """Initialize embedding model"""
-        if settings.OPENAI_API_KEY:
-            return OpenAIEmbeddings(
-                model=settings.OPENAI_EMBEDDING_MODEL,
-                openai_api_key=settings.OPENAI_API_KEY
-            )
+        # choose embedding model and dimension
+        if settings.OPENAI_API_KEY and OpenAIEmbeddings is not None:
+            self.embeddings = OpenAIEmbeddings(model=settings.OPENAI_EMBEDDING_MODEL, openai_api_key=settings.OPENAI_API_KEY)
+            self.dimension = 1536
+        elif HuggingFaceEmbeddings is not None:
+            self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            self.dimension = 384
         else:
-            # Fallback to local embeddings
-            return HuggingFaceEmbeddings(
-                model_name="sentence-transformers/all-MiniLM-L6-v2"
-            )
-    
-    def _ensure_extension(self):
-        """
-        Ensure pgvector extension is enabled
-        
-        TODO: Implement this method
-        - Execute: CREATE EXTENSION IF NOT EXISTS vector;
-        - Create embeddings table if not exists
+            self.embeddings = None
+            self.dimension = getattr(settings, "EMBED_DIM", 384)
+
+        # ensure pgvector extension and table exist
+        self._ensure_extension_and_table()
+
+    def _ensure_extension_and_table(self):
+        try:
+            self.db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        except Exception:
+            # extension may need superuser; ignore if fails
+            pass
+
+        create_table_sql = f"""
+        CREATE TABLE IF NOT EXISTS document_embeddings (
+            id SERIAL PRIMARY KEY,
+            document_id INTEGER,
+            fund_id INTEGER,
+            content TEXT NOT NULL,
+            embedding VECTOR({self.dimension}),
+            metadata JSONB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """
         try:
-            # Enable pgvector extension
-            self.db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            
-            # Create embeddings table
-            # Dimension: 1536 for OpenAI, 384 for sentence-transformers
-            dimension = 1536 if settings.OPENAI_API_KEY else 384
-            
-            create_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS document_embeddings (
-                id SERIAL PRIMARY KEY,
-                document_id INTEGER,
-                fund_id INTEGER,
-                content TEXT NOT NULL,
-                embedding vector({dimension}),
-                metadata JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            
-            CREATE INDEX IF NOT EXISTS document_embeddings_embedding_idx 
-            ON document_embeddings USING ivfflat (embedding vector_cosine_ops)
-            WITH (lists = 100);
-            """
-            
             self.db.execute(text(create_table_sql))
+            # create ivfflat index if not exists (note: may need REINDEX after populate)
+            try:
+                self.db.execute(text("""
+                CREATE INDEX IF NOT EXISTS document_embeddings_embedding_idx
+                ON document_embeddings USING ivfflat (embedding vector_cosine_ops)
+                WITH (lists = 100);
+                """))
+            except Exception:
+                pass
             self.db.commit()
         except Exception as e:
-            print(f"Error ensuring pgvector extension: {e}")
+            print(f"[VectorStore] ensure table error: {e}")
             self.db.rollback()
-    
-    async def add_document(self, content: str, metadata: Dict[str, Any]):
-        """
-        Add a document to the vector store
-        
-        TODO: Implement this method
-        - Generate embedding for content
-        - Insert into document_embeddings table
-        - Store metadata as JSONB
-        """
-        try:
-            # Generate embedding
-            embedding = await self._get_embedding(content)
-            embedding_list = embedding.tolist()
-            embedding_str = str(embedding_list)  # '[0.1,0.2,...]'
 
+    async def _compute_embedding(self, text: str) -> np.ndarray:
+        # run embedding in thread to avoid blocking event loop
+        if self.embeddings is None:
+            # dummy random vector (not ideal in production)
+            return np.zeros(self.dimension, dtype=np.float32)
+        def sync_embed():
+            # compatible with different embedding wrappers
+            if hasattr(self.embeddings, "embed_query"):
+                return self.embeddings.embed_query(text)
+            if hasattr(self.embeddings, "encode"):
+                return self.embeddings.encode(text)
+            # fallback
+            return np.zeros(self.dimension, dtype=np.float32)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, sync_embed)
+        return np.array(result, dtype=np.float32)
+
+    async def add_document(self, content: str, metadata: Dict[str, Any]):
+        try:
+            emb = await self._compute_embedding(content)
+            emb_str = "[" + ",".join(map(str, emb.tolist())) + "]"
             insert_sql = text("""
                 INSERT INTO document_embeddings (document_id, fund_id, content, embedding, metadata)
                 VALUES (:document_id, :fund_id, :content, :embedding, :metadata)
             """)
-
-            self.db.execute(insert_sql, {
+            params = {
                 "document_id": metadata.get("document_id"),
                 "fund_id": metadata.get("fund_id"),
                 "content": content,
-                "embedding": embedding_str,
-                "metadata": json.dumps(metadata)  # convert dict to JSON string
-            })
+                "embedding": emb_str,
+                "metadata": json.dumps(metadata)
+            }
+            self.db.execute(insert_sql, params)
             self.db.commit()
+            return True
         except Exception as e:
-            print(f"Error adding document: {e}")
+            print(f"[VectorStore] add_document error: {e}")
             self.db.rollback()
             raise
-    
-    async def similarity_search(
-        self, 
-        query: str, 
-        k: int = 5, 
-        filter_metadata: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Search for similar documents using cosine similarity
-        
-        TODO: Implement this method
-        - Generate query embedding
-        - Use pgvector's <=> operator for cosine distance
-        - Apply metadata filters if provided
-        - Return top k results
-        
-        Args:
-            query: Search query
-            k: Number of results to return
-            filter_metadata: Optional metadata filters (e.g., {"fund_id": 1})
-            
-        Returns:
-            List of similar documents with scores
-        """
+
+    async def similarity_search(self, query: str, k: int = 5, filter_metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:
-            # Generate query embedding
-            query_embedding = await self._get_embedding(query)
-            embedding_list = query_embedding.tolist()
-            
-            # Build query with optional filters
+            qemb = await self._compute_embedding(query)
+            emb_str = "[" + ",".join(map(str, qemb.tolist())) + "]"
+            params = {"embedding": emb_str, "k": k}
             where_clause = ""
             if filter_metadata:
-                conditions = []
-                for key, value in filter_metadata.items():
-                    if key in ["document_id", "fund_id"]:
-                        conditions.append(f"{key} = {value}")
-                if conditions:
-                    where_clause = "WHERE " + " AND ".join(conditions)
-            
-            # Search using cosine distance (<=> operator)
-            search_sql = text(f"""
-                SELECT 
-                    id,
-                    document_id,
-                    fund_id,
-                    content,
-                    metadata,
-                    1 - (embedding <=> :query_embedding) as similarity_score
+                conds = []
+                for kf, vf in filter_metadata.items():
+                    if kf in ("fund_id", "document_id"):
+                        conds.append(f"{kf} = :{kf}")
+                        params[kf] = vf
+                if conds:
+                    where_clause = "WHERE " + " AND ".join(conds)
+
+            sql = text(f"""
+                SELECT id, document_id, fund_id, content, metadata,
+                    1 - (embedding <=> CAST(:embedding AS vector)) AS similarity_score
                 FROM document_embeddings
                 {where_clause}
-                ORDER BY embedding <=> :query_embedding
+                ORDER BY embedding <=> CAST(:embedding AS vector)
                 LIMIT :k
             """)
-            
-            result = self.db.execute(search_sql, {
-                "query_embedding": str(embedding_list),
-                "k": k
-            })
-            
-            # Format results
-            results = []
-            for row in result:
-                results.append({
-                    "id": row[0],
-                    "document_id": row[1],
-                    "fund_id": row[2],
-                    "content": row[3],
-                    "metadata": row[4],
-                    "score": float(row[5])
+            result = self.db.execute(sql, params)
+            rows = result.fetchall()
+            out = []
+            for r in rows:
+                out.append({
+                    "id": r[0],
+                    "document_id": r[1],
+                    "fund_id": r[2],
+                    "content": r[3],
+                    "metadata": r[4],
+                    "score": float(r[5]) if r[5] is not None else None
                 })
-            
-            return results
+            return out
         except Exception as e:
-            print(f"Error in similarity search: {e}")
+            print(f"[VectorStore] similarity_search error: {e}")
             return []
-    
-    async def _get_embedding(self, text: str) -> np.ndarray:
-        """Generate embedding for text"""
-        if hasattr(self.embeddings, 'embed_query'):
-            embedding = self.embeddings.embed_query(text)
-        else:
-            embedding = self.embeddings.encode(text)
-        
-        return np.array(embedding, dtype=np.float32)
-    
+
     def clear(self, fund_id: Optional[int] = None):
-        """
-        Clear the vector store
-        
-        TODO: Implement this method
-        - Delete all embeddings (or filter by fund_id)
-        """
         try:
             if fund_id:
-                delete_sql = text("DELETE FROM document_embeddings WHERE fund_id = :fund_id")
-                self.db.execute(delete_sql, {"fund_id": fund_id})
+                self.db.execute(text("DELETE FROM document_embeddings WHERE fund_id = :fund_id"), {"fund_id": fund_id})
             else:
-                delete_sql = text("DELETE FROM document_embeddings")
-                self.db.execute(delete_sql)
-            
+                self.db.execute(text("DELETE FROM document_embeddings"))
             self.db.commit()
         except Exception as e:
-            print(f"Error clearing vector store: {e}")
+            print(f"[VectorStore] clear error: {e}")
             self.db.rollback()
-
-    async def add_text_chunks(self, document_id: int, fund_id: int, chunks: List[Dict[str, Any]]):
-        """
-        Store text chunks (and their embeddings) into the vector database.
-        """
-        for chunk in chunks:
-            text = chunk["text"]
-            metadata = chunk["metadata"]
-
-            # buat embedding (bisa pakai openai, ollama, atau model lokal)
-            embedding = await self.create_embedding(text)
-
-            # simpan ke tabel document_embeddings
-            self.db.execute(
-                """
-                INSERT INTO document_embeddings (document_id, fund_id, content, metadata, embedding)
-                VALUES (:document_id, :fund_id, :content, :metadata, :embedding)
-                """,
-                {
-                    "document_id": document_id,
-                    "fund_id": fund_id,
-                    "content": text,
-                    "metadata": str(metadata),
-                    "embedding": str(embedding)
-                }
-            )
-            self.db.commit()
-
-    async def _update_status(
-        self,
-        document_id: int,
-        status: str,
-        error_message: Optional[str] = None
-    ):
-        """
-        Update parsing status and error message in the `documents` table.
-
-        Args:
-            document_id: Document ID
-            status: ['pending', 'processing', 'completed', 'failed']
-            error_message: Optional error details
-        """
-        try:
-            query = text("""
-                UPDATE documents
-                SET parsing_status = :status,
-                    error_message = :error_message
-                WHERE id = :document_id
-            """)
-            await self.db.execute(query, {
-                "status": status,
-                "error_message": error_message,
-                "document_id": document_id
-            })
-            await self.db.commit()
-            print(f"Document {document_id} status updated to '{status}'")
-        except Exception as e:
-            print(f"Failed to update status for document {document_id}: {e}")

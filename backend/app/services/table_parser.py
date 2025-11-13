@@ -1,93 +1,63 @@
 """
 Table parsing service for document ingestion.
-Extracts tabular data from documents (PDF, Excel, or text).
+Normalizes tables into a consistent list-of-dicts format:
+[ { "sheet": "...", "rows": [ {col: val}, ... ] }, ... ]
+Supports: pdf, xlsx/xls, csv, txt
 """
-import pandas as pd
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any
 import io
 import re
-
+import pandas as pd
 
 class TableParser:
-    """Extract tables from uploaded documents."""
-
     def __init__(self):
         pass
 
     def parse(self, file_bytes: bytes, file_type: str) -> List[Dict[str, Any]]:
-        """
-        Parse tables depending on file type.
-
-        Args:
-            file_bytes: File content in bytes.
-            file_type: MIME type or extension ('pdf', 'xlsx', 'csv', 'txt', etc.)
-
-        Returns:
-            List of parsed tables as dictionaries.
-        """
+        ft = (file_type or "").lower().lstrip(".")
         try:
-            if file_type in ["xlsx", "xls"]:
+            if ft in ("xlsx", "xls"):
                 return self._parse_excel(file_bytes)
-            elif file_type == "csv":
+            if ft == "csv":
                 return self._parse_csv(file_bytes)
-            elif file_type == "txt":
+            if ft == "txt":
                 return self._parse_text(file_bytes)
-            else:
-                # For PDF or unsupported, fallback to empty
+            if ft == "pdf":
+                # For PDF, caller (DocumentProcessor) will use pdfplumber-specific parser.
+                # But keep a placeholder to allow fallback.
                 return []
         except Exception as e:
-            print(f"Error parsing {file_type}: {e}")
-            return []
+            print(f"[TableParser] parse error for {file_type}: {e}")
+        return []
 
     def _parse_excel(self, file_bytes: bytes) -> List[Dict[str, Any]]:
-        """Extract all sheets as tables."""
-        tables = []
-        excel_data = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
-        for sheet_name, df in excel_data.items():
-            tables.append({
-                "sheet": sheet_name,
-                "rows": df.fillna("").to_dict(orient="records")
-            })
+        tables: List[Dict[str, Any]] = []
+        data = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
+        for sheet_name, df in data.items():
+            rows = df.fillna("").to_dict(orient="records")
+            tables.append({"sheet": sheet_name, "rows": rows})
         return tables
 
     def _parse_csv(self, file_bytes: bytes) -> List[Dict[str, Any]]:
-        """Extract CSV as a single table."""
         df = pd.read_csv(io.BytesIO(file_bytes))
-        return [{
-            "sheet": "csv_data",
-            "rows": df.fillna("").to_dict(orient="records")
-        }]
+        rows = df.fillna("").to_dict(orient="records")
+        return [{"sheet": "csv", "rows": rows}]
 
     def _parse_text(self, file_bytes: bytes) -> List[Dict[str, Any]]:
-        """Extract tabular-like text lines (very basic)."""
         text = file_bytes.decode("utf-8", errors="ignore")
-        lines = [re.split(r"\s{2,}|\t", line.strip()) for line in text.splitlines() if line.strip()]
+        lines = [ln for ln in text.splitlines() if ln.strip()]
         if not lines:
             return []
-        headers = lines[0]
-        rows = [dict(zip(headers, row)) for row in lines[1:] if len(row) == len(headers)]
-        return [{
-            "sheet": "text_data",
-            "rows": rows
-        }]
-    
-    def parse_table(self, table_data, page_number: int, fund_id: int) -> Dict[str, Any]:
-        """
-        Parse dan klasifikasikan tabel PDF.
-        """
-        # contoh deteksi sederhana:
-        if any("Capital" in str(cell) for row in table_data for cell in row):
-            category = "capital_call"
-        elif any("Distribution" in str(cell) for row in table_data for cell in row):
-            category = "distribution"
-        elif any("Adjustment" in str(cell) for row in table_data for cell in row):
-            category = "adjustment"
-        else:
-            category = "unknown"
-
-        return {
-            "fund_id": fund_id,
-            "page": page_number,
-            "category": category,
-            "rows": table_data
-        }
+        # split on two-or-more spaces or tabs
+        split_lines = [re.split(r"\s{2,}|\t", ln.strip()) for ln in lines]
+        headers = split_lines[0]
+        rows = []
+        for row in split_lines[1:]:
+            if len(row) != len(headers):
+                # try pad/truncate
+                if len(row) < len(headers):
+                    row += [""] * (len(headers) - len(row))
+                else:
+                    row = row[: len(headers)]
+            rows.append({headers[i]: row[i] for i in range(len(headers))})
+        return [{"sheet": "text", "rows": rows}]

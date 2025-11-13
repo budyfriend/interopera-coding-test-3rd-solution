@@ -7,6 +7,7 @@ from typing import Dict, Any
 import uuid
 from datetime import datetime
 from app.db.session import get_db
+from app.core.config import settings
 from app.schemas.chat import (
     ChatQueryRequest,
     ChatQueryResponse,
@@ -32,23 +33,18 @@ async def process_chat_query(
     Process a chat query using RAGEngine.
 
     Steps:
-    1. Retrieve conversation history (if any).
-    2. Use RAGEngine to retrieve top-k relevant documents and generate answer.
-    3. Append user query + assistant response to conversation history.
-    4. Return answer and sources.
+    1. Retrieve top documents from vector store
+    2. Build context string
+    3. Optionally perform SQL-based calculation if question matches known metrics
+    4. Generate answer using LLM
     """
-    # 1️⃣ Conversation history
-    conversation_history: List[Dict] = []
-    if request.conversation_id and request.conversation_id in conversations:
-        conversation_history = conversations[request.conversation_id].get("messages", [])
 
     # 2️⃣ Query RAG engine
     rag_engine = RAGEngine(db=db)  # Inject DB if needed for metadata filters
     response = await rag_engine.query(
         question=request.query,
-        top_k=request.top_k if hasattr(request, "top_k") else 3,
-        fund_id=request.fund_id,
-        conversation_history=conversation_history
+        top_k=settings.TOP_K_RESULTS,
+        fund_id=request.fund_id
     )
 
     # 3️⃣ Update conversation history
