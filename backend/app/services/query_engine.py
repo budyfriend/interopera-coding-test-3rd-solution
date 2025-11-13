@@ -26,12 +26,12 @@ class QueryEngine:
         if settings.OPENAI_API_KEY:
             return ChatOpenAI(
                 model=settings.OPENAI_MODEL,
-                temperature=0,
+                temperature=1,
                 openai_api_key=settings.OPENAI_API_KEY
             )
         else:
             # Fallback to local LLM
-            return Ollama(model="llama2")
+            return Ollama(model="llama2:latest", base_url=settings.LLM_BASE_URL)
     
     async def process_query(
         self, 
@@ -54,6 +54,8 @@ class QueryEngine:
         
         # Step 1: Classify query intent
         intent = await self._classify_intent(query)
+
+        print(f"intent : {intent}")
         
         # Step 2: Retrieve relevant context from vector store
         filter_metadata = {"fund_id": fund_id} if fund_id else None

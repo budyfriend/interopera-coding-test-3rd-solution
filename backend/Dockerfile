@@ -6,6 +6,11 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     gcc \
+    build-essential \
+    rustc \
+    cargo \
+    pkg-config \
+    libssl-dev \
     libpq-dev \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

@@ -30,8 +30,9 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4-turbo-preview"
+    OPENAI_MODEL: str = "o4-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    LLM_BASE_URL: str = "http://host.docker.internal:11434"
     
     # Anthropic (optional)
     ANTHROPIC_API_KEY: str = ""

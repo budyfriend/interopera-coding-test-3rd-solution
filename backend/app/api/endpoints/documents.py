@@ -16,6 +16,7 @@ from app.schemas.document import (
 )
 from app.services.document_processor import DocumentProcessor
 from app.core.config import settings
+from pathlib import Path
 
 router = APIRouter()
 
@@ -83,32 +84,53 @@ async def upload_document(
 
 
 async def process_document_task(document_id: int, file_path: str, fund_id: int):
-    """Background task to process document"""
+    """Background task to process document."""
     from app.db.session import SessionLocal
     
     db = SessionLocal()
     
     try:
-        # Update status to processing
+        # Update status to 'processing'
         document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise ValueError(f"Document with id {document_id} not found")
+
         document.parsing_status = "processing"
         db.commit()
-        
+
+        # Read file from disk
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        with open(path, "rb") as f:
+            file_bytes = f.read()
+
+        file_type = path.suffix.lstrip(".") or "pdf"
+
         # Process document
         processor = DocumentProcessor()
-        result = await processor.process_document(file_path, document_id, fund_id)
-        
-        # Update status
-        document.parsing_status = result["status"]
-        if result["status"] == "failed":
-            document.error_message = result.get("error")
+        result = await processor.process_document(
+            file_bytes=file_bytes,
+            file_type=file_type,
+            fund_id=fund_id,
+            document_id=document_id
+        )
+
+        # Update status in DB
+        document.parsing_status = result.get("status", "unknown")
+        document.error_message = result.get("error", None)
         db.commit()
-        
+
     except Exception as e:
+        # If anything fails, record the error
         document = db.query(Document).filter(Document.id == document_id).first()
-        document.parsing_status = "failed"
-        document.error_message = str(e)
-        db.commit()
+        if document:
+            document.parsing_status = "failed"
+            document.error_message = str(e)
+            db.commit()
+        print(f"[ERROR] process_document_task failed: {e}")
+
     finally:
         db.close()
 

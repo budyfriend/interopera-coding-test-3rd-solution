@@ -15,6 +15,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from app.core.config import settings
 from app.db.session import SessionLocal
+import json
 
 
 class VectorStore:
@@ -89,19 +90,19 @@ class VectorStore:
             # Generate embedding
             embedding = await self._get_embedding(content)
             embedding_list = embedding.tolist()
-            
-            # Insert into database
+            embedding_str = str(embedding_list)  # '[0.1,0.2,...]'
+
             insert_sql = text("""
                 INSERT INTO document_embeddings (document_id, fund_id, content, embedding, metadata)
-                VALUES (:document_id, :fund_id, :content, :embedding::vector, :metadata::jsonb)
+                VALUES (:document_id, :fund_id, :content, :embedding, :metadata)
             """)
-            
+
             self.db.execute(insert_sql, {
                 "document_id": metadata.get("document_id"),
                 "fund_id": metadata.get("fund_id"),
                 "content": content,
-                "embedding": str(embedding_list),
-                "metadata": str(metadata)
+                "embedding": embedding_str,
+                "metadata": json.dumps(metadata)  # convert dict to JSON string
             })
             self.db.commit()
         except Exception as e:
@@ -155,10 +156,10 @@ class VectorStore:
                     fund_id,
                     content,
                     metadata,
-                    1 - (embedding <=> :query_embedding::vector) as similarity_score
+                    1 - (embedding <=> :query_embedding) as similarity_score
                 FROM document_embeddings
                 {where_clause}
-                ORDER BY embedding <=> :query_embedding::vector
+                ORDER BY embedding <=> :query_embedding
                 LIMIT :k
             """)
             
@@ -212,3 +213,61 @@ class VectorStore:
         except Exception as e:
             print(f"Error clearing vector store: {e}")
             self.db.rollback()
+
+    async def add_text_chunks(self, document_id: int, fund_id: int, chunks: List[Dict[str, Any]]):
+        """
+        Store text chunks (and their embeddings) into the vector database.
+        """
+        for chunk in chunks:
+            text = chunk["text"]
+            metadata = chunk["metadata"]
+
+            # buat embedding (bisa pakai openai, ollama, atau model lokal)
+            embedding = await self.create_embedding(text)
+
+            # simpan ke tabel document_embeddings
+            self.db.execute(
+                """
+                INSERT INTO document_embeddings (document_id, fund_id, content, metadata, embedding)
+                VALUES (:document_id, :fund_id, :content, :metadata, :embedding)
+                """,
+                {
+                    "document_id": document_id,
+                    "fund_id": fund_id,
+                    "content": text,
+                    "metadata": str(metadata),
+                    "embedding": str(embedding)
+                }
+            )
+            self.db.commit()
+
+    async def _update_status(
+        self,
+        document_id: int,
+        status: str,
+        error_message: Optional[str] = None
+    ):
+        """
+        Update parsing status and error message in the `documents` table.
+
+        Args:
+            document_id: Document ID
+            status: ['pending', 'processing', 'completed', 'failed']
+            error_message: Optional error details
+        """
+        try:
+            query = text("""
+                UPDATE documents
+                SET parsing_status = :status,
+                    error_message = :error_message
+                WHERE id = :document_id
+            """)
+            await self.db.execute(query, {
+                "status": status,
+                "error_message": error_message,
+                "document_id": document_id
+            })
+            await self.db.commit()
+            print(f"Document {document_id} status updated to '{status}'")
+        except Exception as e:
+            print(f"Failed to update status for document {document_id}: {e}")

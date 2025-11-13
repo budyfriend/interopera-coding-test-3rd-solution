@@ -15,6 +15,7 @@ from app.schemas.chat import (
     ChatMessage
 )
 from app.services.query_engine import QueryEngine
+from app.services.rag_engine import RAGEngine
 
 router = APIRouter()
 
@@ -26,23 +27,31 @@ conversations: Dict[str, Dict[str, Any]] = {}
 async def process_chat_query(
     request: ChatQueryRequest,
     db: Session = Depends(get_db)
-):
-    """Process a chat query using RAG"""
-    
-    # Get conversation history if conversation_id provided
-    conversation_history = []
+) -> ChatQueryResponse:
+    """
+    Process a chat query using RAGEngine.
+
+    Steps:
+    1. Retrieve conversation history (if any).
+    2. Use RAGEngine to retrieve top-k relevant documents and generate answer.
+    3. Append user query + assistant response to conversation history.
+    4. Return answer and sources.
+    """
+    # 1️⃣ Conversation history
+    conversation_history: List[Dict] = []
     if request.conversation_id and request.conversation_id in conversations:
-        conversation_history = conversations[request.conversation_id]["messages"]
-    
-    # Process query
-    query_engine = QueryEngine(db)
-    response = await query_engine.process_query(
-        query=request.query,
+        conversation_history = conversations[request.conversation_id].get("messages", [])
+
+    # 2️⃣ Query RAG engine
+    rag_engine = RAGEngine(db=db)  # Inject DB if needed for metadata filters
+    response = await rag_engine.query(
+        question=request.query,
+        top_k=request.top_k if hasattr(request, "top_k") else 3,
         fund_id=request.fund_id,
         conversation_history=conversation_history
     )
-    
-    # Update conversation history
+
+    # 3️⃣ Update conversation history
     if request.conversation_id:
         if request.conversation_id not in conversations:
             conversations[request.conversation_id] = {
@@ -51,14 +60,18 @@ async def process_chat_query(
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
-        
+        # Append messages
         conversations[request.conversation_id]["messages"].extend([
             {"role": "user", "content": request.query, "timestamp": datetime.utcnow()},
             {"role": "assistant", "content": response["answer"], "timestamp": datetime.utcnow()}
         ])
         conversations[request.conversation_id]["updated_at"] = datetime.utcnow()
-    
-    return ChatQueryResponse(**response)
+
+    # 4️⃣ Return structured response
+    return ChatQueryResponse(
+        answer=response.get("answer", ""),
+        sources=response.get("sources", [])
+    )
 
 
 @router.post("/conversations", response_model=Conversation)
