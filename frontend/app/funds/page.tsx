@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { fundApi } from '@/lib/api'
 import { formatCurrency, formatPercentage } from '@/lib/utils'
-import { TrendingUp, TrendingDown, ArrowRight, Loader2 } from 'lucide-react'
+import { TrendingUp, TrendingDown, ArrowRight, Edit, Loader2 } from 'lucide-react'
 
 export default function FundsPage() {
   const { data: funds, isLoading, error } = useQuery({
@@ -45,7 +45,13 @@ export default function FundsPage() {
         </Link>
       </div>
 
-      {funds && funds.length === 0 ? (
+      {Array.isArray(funds) && funds.length > 0 ? (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {funds?.map((fund: any) => (
+            <FundCard key={fund.id} fund={fund} />
+          ))}
+        </div>
+      ) : (
         <div className="bg-white rounded-lg shadow-md p-12 text-center">
           <p className="text-gray-600 mb-4">No funds found. Upload a fund document to get started.</p>
           <Link
@@ -54,12 +60,6 @@ export default function FundsPage() {
           >
             Upload Document
           </Link>
-        </div>
-      ) : (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {funds?.map((fund: any) => (
-            <FundCard key={fund.id} fund={fund} />
-          ))}
         </div>
       )}
     </div>
@@ -72,8 +72,8 @@ function FundCard({ fund }: { fund: any }) {
   const irr = metrics.irr || 0
 
   return (
-    <Link href={`/funds/${fund.id}`}>
-      <div className="bg-white rounded-lg shadow-md hover:shadow-lg transition p-6 h-full">
+    <div className="bg-white rounded-lg shadow-md hover:shadow-lg transition p-6 h-full">
+        <Link href={`/funds/${fund.id}`}>
         <div className="mb-4">
           <h3 className="text-xl font-semibold text-gray-900 mb-1">
             {fund.name}
@@ -108,8 +108,17 @@ function FundCard({ fund }: { fund: any }) {
         <div className="flex items-center text-blue-600 text-sm font-medium">
           View Details <ArrowRight className="w-4 h-4 ml-1" />
         </div>
+        </Link>
+
+        <Link
+          href={`/funds/edit/${fund.id}`}
+          className="flex items-center text-blue-600 text-sm font-medium mt-2"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Edit Fund <Edit className="w-4 h-4 ml-1" />
+        </Link>
       </div>
-    </Link>
   )
 }
 

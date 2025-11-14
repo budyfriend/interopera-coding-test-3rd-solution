@@ -60,6 +60,12 @@ export const fundApi = {
     return response.data
   },
   
+  update: async (fundId: number, fund: any) => {
+    const response = await api.put(`/api/funds/${fundId}`, fund)
+    return response.data
+  },
+  
+
   getTransactions: async (fundId: number, type: string, page: number = 1, limit: number = 50) => {
     const response = await api.get(`/api/funds/${fundId}/transactions`, {
       params: { transaction_type: type, page, limit }
