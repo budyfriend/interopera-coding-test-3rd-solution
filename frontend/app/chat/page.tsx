@@ -20,7 +20,6 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false)
   const [conversationId, setConversationId] = useState<string>()
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [fundId, setFundId] = useState<number | "">("");
 
   // Fetch fund list
   const { data: funds, isLoading, errorFund } = useQuery({
@@ -28,12 +27,18 @@ export default function ChatPage() {
     queryFn: () => fundApi.list()
   });
 
+  const [fundId, setFundId] = useState<number | "">("");
+
   useEffect(() => {
     // Create conversation on mount
     chatApi.createConversation().then(conv => {
       setConversationId(conv.conversation_id)
     })
-  }, [])
+
+    if (fundId === "" && funds && funds.length > 0) {
+      setFundId(funds[0].id);
+    }
+  }, [funds, fundId])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
