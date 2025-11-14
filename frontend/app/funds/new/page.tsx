@@ -65,7 +65,7 @@ export default function NewFundPage() {
         vintage_year: parseInt(form.vintage_year),
       });
 
-      router.push("/funds");
+      window.location.href = "/funds";
     } catch (err) {
       console.error("Failed to create fund:", err);
       alert("Failed to create fund. Please try again.");

@@ -64,6 +64,11 @@ export const fundApi = {
     const response = await api.put(`/api/funds/${fundId}`, fund)
     return response.data
   },
+
+  delete: async (fundId: number) => {
+    const response = await api.delete(`/api/funds/${fundId}`)
+    return response.data
+  },
   
 
   getTransactions: async (fundId: number, type: string, page: number = 1, limit: number = 50) => {
