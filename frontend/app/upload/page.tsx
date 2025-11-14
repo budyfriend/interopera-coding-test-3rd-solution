@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { useQuery } from "@tanstack/react-query";
 import { Upload, CheckCircle, XCircle, Loader2 } from 'lucide-react'
@@ -20,6 +20,12 @@ export default function UploadPage() {
     queryKey: ["funds"],
     queryFn: () => fundApi.list()
   });
+
+  useEffect(() => {
+    if (fundId === "" && funds && funds.length > 0) {
+      setFundId(funds[0].id);
+    }
+  }, [funds, fundId])
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return
