@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { fundApi } from '@/lib/api'
 import { formatCurrency, formatPercentage } from '@/lib/utils'
-import { TrendingUp, TrendingDown, ArrowRight, Edit, Loader2 } from 'lucide-react'
+import { TrendingUp, TrendingDown, ArrowRight, Edit, Trash, Loader2 } from 'lucide-react'
 
 export default function FundsPage() {
   const { data: funds, isLoading, error } = useQuery({
@@ -73,6 +73,7 @@ function FundCard({ fund }: { fund: any }) {
 
   return (
     <div className="bg-white rounded-lg shadow-md hover:shadow-lg transition p-6 h-full">
+      <Trash className="w-5 h-5 ml-1 text-red-600 float-right" />
         <Link href={`/funds/${fund.id}`}>
         <div className="mb-4">
           <h3 className="text-xl font-semibold text-gray-900 mb-1">
