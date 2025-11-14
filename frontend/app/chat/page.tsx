@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Send, Loader2, FileText } from 'lucide-react'
-import { chatApi } from '@/lib/api'
+import { chatApi, fundApi } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
+import { useQuery } from "@tanstack/react-query";
 
 interface Message {
   role: 'user' | 'assistant'
@@ -19,6 +20,13 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false)
   const [conversationId, setConversationId] = useState<string>()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [fundId, setFundId] = useState<number | "">("");
+
+  // Fetch fund list
+  const { data: funds, isLoading, errorFund } = useQuery({
+    queryKey: ["funds"],
+    queryFn: () => fundApi.list()
+  });
 
   useEffect(() => {
     // Create conversation on mount
@@ -46,7 +54,7 @@ export default function ChatPage() {
     setLoading(true)
 
     try {
-      const response = await chatApi.query(input, undefined, conversationId)
+      const response = await chatApi.query(input, fundId, conversationId)
       
       const assistantMessage: Message = {
         role: 'assistant',
@@ -79,6 +87,27 @@ export default function ChatPage() {
       </div>
 
       <div className="bg-white rounded-lg shadow-md flex flex-col h-full">
+
+        {/* FUND SELECT */}
+      {funds && funds.length === 0 ? (
+        <></>
+      ) : (
+        <div className="m-6">
+          <label className="block mb-1 font-medium">Select Fund</label>
+          <select
+            value={fundId}
+            onChange={(e) => setFundId(Number(e.target.value))}
+            className="border rounded px-3 py-2 w-full"
+          >
+            {funds?.map((fund) => (
+              <option key={fund.id} value={fund.id}>
+                {fund.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {messages.length === 0 && (

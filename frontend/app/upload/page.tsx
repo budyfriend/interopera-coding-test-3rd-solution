@@ -16,11 +16,10 @@ export default function UploadPage() {
   }>({ status: 'idle' })
 
   // Fetch fund list
-  const { data: funds, isLoading: loadingFunds } = useQuery({
+  const { data: funds, isLoading, errorFund } = useQuery({
     queryKey: ["funds"],
     queryFn: () => fundApi.list()
   });
-
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return
@@ -43,10 +42,15 @@ export default function UploadPage() {
       pollDocumentStatus(result.document_id)
       
     } catch (error: any) {
+      const detail = error.response?.data?.detail
+
       setUploadStatus({
         status: 'error',
-        message: error.response?.data?.detail || 'Upload failed'
+        message: typeof detail === "object"
+          ? JSON.stringify(detail)
+          : (detail || 'Upload failed')
       })
+
       setUploading(false)
     }
   }, [fundId])
@@ -126,7 +130,6 @@ export default function UploadPage() {
             onChange={(e) => setFundId(Number(e.target.value))}
             className="border rounded px-3 py-2 w-full"
           >
-            <option value="">-- Choose Fund --</option>
             {funds?.map((fund) => (
               <option key={fund.id} value={fund.id}>
                 {fund.name}
