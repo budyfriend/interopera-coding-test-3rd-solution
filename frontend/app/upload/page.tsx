@@ -2,16 +2,25 @@
 
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
+import { useQuery } from "@tanstack/react-query";
 import { Upload, CheckCircle, XCircle, Loader2 } from 'lucide-react'
-import { documentApi } from '@/lib/api'
+import { documentApi, fundApi } from "@/lib/api";
 
 export default function UploadPage() {
   const [uploading, setUploading] = useState(false)
+  const [fundId, setFundId] = useState<number | "">("");
   const [uploadStatus, setUploadStatus] = useState<{
     status: 'idle' | 'uploading' | 'processing' | 'success' | 'error'
     message?: string
     documentId?: number
   }>({ status: 'idle' })
+
+  // Fetch fund list
+  const { data: funds, isLoading: loadingFunds } = useQuery({
+    queryKey: ["funds"],
+    queryFn: () => fundApi.list()
+  });
+
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return
@@ -22,7 +31,7 @@ export default function UploadPage() {
     setUploadStatus({ status: 'uploading', message: 'Uploading file...' })
 
     try {
-      const result = await documentApi.upload(file)
+      const result = await documentApi.upload(file, fundId)
       
       setUploadStatus({
         status: 'processing',
@@ -40,7 +49,7 @@ export default function UploadPage() {
       })
       setUploading(false)
     }
-  }, [])
+  }, [fundId])
 
   const pollDocumentStatus = async (documentId: number) => {
     const maxAttempts = 60 // 5 minutes max
@@ -105,6 +114,27 @@ export default function UploadPage() {
           Upload a PDF fund performance report to automatically extract and analyze data
         </p>
       </div>
+
+    {/* FUND SELECT */}
+      {funds && funds.length === 0 ? (
+        <></>
+      ) : (
+        <div className="mb-6">
+          <label className="block mb-1 font-medium">Select Fund</label>
+          <select
+            value={fundId}
+            onChange={(e) => setFundId(Number(e.target.value))}
+            className="border rounded px-3 py-2 w-full"
+          >
+            <option value="">-- Choose Fund --</option>
+            {funds?.map((fund) => (
+              <option key={fund.id} value={fund.id}>
+                {fund.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Upload Area */}
       <div
