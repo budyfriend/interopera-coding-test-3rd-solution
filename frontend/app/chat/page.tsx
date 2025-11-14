@@ -123,16 +123,20 @@ export default function ChatPage() {
               </p>
               <div className="space-y-2 max-w-md mx-auto">
                 <SampleQuestion
-                  question="What is the current DPI?"
-                  onClick={() => setInput("What is the current DPI?")}
+                  question="What is the current DPI of this fund?"
+                  onClick={() => setInput("What is the current DPI of this fund?")}
                 />
                 <SampleQuestion
-                  question="Calculate the IRR for this fund"
-                  onClick={() => setInput("Calculate the IRR for this fund")}
+                  question="Has the fund returned all invested capital to LPs?"
+                  onClick={() => setInput("Has the fund returned all invested capital to LPs?")}
                 />
                 <SampleQuestion
-                  question="What does Paid-In Capital mean?"
-                  onClick={() => setInput("What does Paid-In Capital mean?")}
+                  question="What does 'Paid-In Capital' mean in this context?"
+                  onClick={() => setInput("What does 'Paid-In Capital' mean in this context?")}
+                />
+                <SampleQuestion
+                  question={`Show me all capital calls in 2025`}
+                  onClick={() => setInput("Show me all capital calls in 2025")}
                 />
               </div>
             </div>
