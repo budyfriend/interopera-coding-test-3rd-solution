@@ -135,8 +135,8 @@ export default function ChatPage() {
                   onClick={() => setInput("What does 'Paid-In Capital' mean in this context?")}
                 />
                 <SampleQuestion
-                  question={`Show me all capital calls in 2025`}
-                  onClick={() => setInput("Show me all capital calls in 2025")}
+                  question={`Show me all capital calls in ${new Date().getFullYear()}`}
+                  onClick={() => setInput(`Show me all capital calls in ${new Date().getFullYear()}`)}
                 />
               </div>
             </div>
